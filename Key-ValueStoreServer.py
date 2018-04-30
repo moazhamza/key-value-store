@@ -15,10 +15,16 @@ from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
 class StoreHandler:
-    def __init__(self, nameIn, connectionsWaitingIn):
+    def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn):
         self.store = {}
         self.name = nameIn
-        self.connectionsWaitingIn = connectionsWaitingIn
+        self.number = replicaNumIn;
+        self.connectionsWaiting = connectionsWaitingIn
+        self.establishedConnections = [None, None, None, None]
+
+        # TODO: Implement delayed, threaded functions on an interval to establish a client connection to each replica server
+        # for rep in self.connectionsWaiting:
+
 
         # Look for log file, populate the memory if it exists, create one if it does not
         self.logFile = None
@@ -68,15 +74,17 @@ if __name__ == '__main__':
     # Handle command-line arguments
     replicaName = sys.argv[1]
     replicaPort = int(sys.argv[2])
+    replicaNumber = -1
     replicaConnectionsToMake = [] # Will be a list of tuples: (name, port)
 
     # Read replicas.txt and prepare to connect to other replicas
     try:
         replicaFile = open('replicas.txt', 'r')
 
-        for line in replicaFile:
+        for i, line in enumerate(replicaFile):
             repTup = tuple(line.split(' ')) # [0] = name, [1] = port
             if repTup[0] == replicaName: # Exclude if the line describes this replica
+                replicaNumber = i
                 continue
 
             replicaConnectionsToMake.append(repTup)
@@ -84,9 +92,10 @@ if __name__ == '__main__':
     except IOError:
         print 'Error: expected replicas.txt but did not find it. Not connected to any other replicas'
 
+        if replicaNumber == -1:
+            print 'Error: Replica # is still -1 after looping through replicas.txt -- should not happen'
 
-
-    handler = StoreHandler(replicaName, replicaConnectionsToMake)
+    handler = StoreHandler(replicaName, replicaNumber, replicaConnectionsToMake)
     processor = Store.Processor(handler)
     transport = TSocket.TServerSocket(port=replicaPort)
     tfactory = TTransport.TBufferedTransportFactory()
