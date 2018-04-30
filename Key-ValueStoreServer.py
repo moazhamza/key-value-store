@@ -1,6 +1,7 @@
 import glob
 import sys
 import os
+import threading
 sys.path.append('gen-py')
 sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
 
@@ -14,27 +15,35 @@ from thrift.transport import TTransport
 from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
+from thrift.transport.TTransport import TTransportException
+
 class StoreHandler:
     def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn):
         self.store = {}
         self.name = nameIn
         self.number = replicaNumIn;
         self.connectionsWaiting = connectionsWaitingIn
+
+        # Will be a list of tuples: (client, transport) after connection has been established
         self.establishedConnections = [None, None, None, None]
 
         # TODO: Implement delayed, threaded functions on an interval to establish a client connection to each replica server
-        # for rep in self.connectionsWaiting:
+        for i, rep in enumerate(self.connectionsWaiting):
+            if i == self.number:
+                continue
 
+            # Callback function takes an iterable for arguments passed, so we put the connection index as an item in a list to pass in
+            threading.Timer(5.0, self.__attemptConnection, args=(i)).start()
 
         # Look for log file, populate the memory if it exists, create one if it does not
         self.logFile = None
         fileName = nameIn + '.txt'
         try:
-            self.logFile = open(fileName, 'ra')
+            self.logFile = open(fileName, 'r')
             self.__populate_from_mem(self.logFile)
         except IOError:
             print 'Persitent storage file not found. Creating ' + fileName + ' now.'
-            self.logFile = open(fileName, 'rw+')
+            self.logFile = open(fileName, 'w+')
 
     def __populate_from_mem(self, log):
         # TODO: Read through the logger, populating the memory as you go
@@ -65,6 +74,29 @@ class StoreHandler:
         else:
             self.store[key] = value
             return False
+
+    def __attemptConnection(repNumber):
+        assert repNumber != self.number
+
+        # Attempting connection to item repNumber in self.connectionsWaiting
+        
+        try:
+            # Make socket
+            transport = TSocket.TSocket('localhost', self.connectionsWaiting[1])
+            # Buffering is critical. Raw sockets are very slow
+            transport = TTransport.TBufferedTransport(transport)
+            # Wrap in a protocol
+            protocol = TBinaryProtocol.TBinaryProtocol(transport)
+            # Create a client to use the protocol encoder
+            client = Calculator.Client(protocol)
+            # Connect!
+            transport.open()
+
+            print('Connection established with ' + self.connectionsWaiting[0])
+            self.establishedConnections[repNumber] = (client, transport)
+        except TTransportException:
+            threading.Timer(5.0, self.__attemptConnection, args=(i)).start()
+            print('Rescheduling connection attempt with ' + self.connectionsWaiting[0])
 
 if __name__ == '__main__':
     if len(sys.argv) != 3:
