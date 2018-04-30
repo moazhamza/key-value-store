@@ -17,6 +17,4 @@ service KeyValueStore {
 
   bool put(1: Key key, 2: Value val, 3: ConsistencyLevel lvl)
     throws (1: SystemException systemException)
-
-
 }

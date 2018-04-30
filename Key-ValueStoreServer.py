@@ -1,13 +1,9 @@
-import glob
 import sys
-import os
+
 sys.path.append('gen-py')
-sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
 
-#from tutorial import Calculator
-#from tutorial.ttypes import InvalidOperation, Operation
-
-from shared.ttypes import SharedStruct
+from keyValStore import KeyValueStore
+from keyValStore.ttypes import SystemException
 
 from thrift.transport import TSocket
 from thrift.transport import TTransport
@@ -30,16 +26,16 @@ class StoreHandler:
         self.logFile = None
         fileName = nameIn + '.txt'
         try:
-            self.logFile = open(fileName, 'ra')
+            self.logFile = open(fileName, 'r')
             self.__populate_from_mem(self.logFile)
+            self.logFile.close()
+            self.logFile = open(fileName, 'a')
         except IOError:
-            print 'Persitent storage file not found. Creating ' + fileName + ' now.'
-            self.logFile = open(fileName, 'rw+')
+            print('Persistent storage file not found. Creating ' + fileName + ' now.')
+            self.logFile = open(fileName, 'a+')
 
     def __populate_from_mem(self, log):
-        # TODO: Read through the logger, populating the memory as you go
         for line in log:
-            # TODO: Populate the store using the lines of the file (Need to settle on format to write to the file
             key, value = tuple(line.strip(':').split(':'))
             self.put(key, value)
 
@@ -50,7 +46,9 @@ class StoreHandler:
         if key in self.store:
             return self.store[key]
         else:
-            return False
+            e = SystemException()
+            e.message = "Key not in store"
+            raise e
 
     def put(self, key, value, lvl=None):
         assert type(key) == int
@@ -58,7 +56,7 @@ class StoreHandler:
         assert key >= 0
         assert key <= 255
         # TODO: Write in logger files all writes committed to the store
-        self.logFile.write(str(key) + ':' + value)
+        self.logFile.write(str(key) + ':' + value + '\n')
         if key in self.store:
             self.store[key] = value
             return True
@@ -66,10 +64,11 @@ class StoreHandler:
             self.store[key] = value
             return False
 
+
 if __name__ == '__main__':
     if len(sys.argv) != 3:
-        print 'Expected two arguments: name and port'
-        return
+        print('Expected two arguments: name and port')
+        exit(-1)
 
     # Handle command-line arguments
     replicaName = sys.argv[1]
@@ -88,15 +87,15 @@ if __name__ == '__main__':
                 continue
 
             replicaConnectionsToMake.append(repTup)
-            print 'Replica to connect to: ' + repTup[0] + ' on port ' + repTup[1]
+            print('Replica to connect to: ' + repTup[0] + ' on port ' + repTup[1])
     except IOError:
-        print 'Error: expected replicas.txt but did not find it. Not connected to any other replicas'
+        print('Error: expected replicas.txt but did not find it. Not connected to any other replicas')
 
         if replicaNumber == -1:
-            print 'Error: Replica # is still -1 after looping through replicas.txt -- should not happen'
+            print('Error: Replica # is still -1 after looping through replicas.txt -- should not happen')
 
     handler = StoreHandler(replicaName, replicaNumber, replicaConnectionsToMake)
-    processor = Store.Processor(handler)
+    processor = KeyValueStore.Processor(handler)
     transport = TSocket.TServerSocket(port=replicaPort)
     tfactory = TTransport.TBufferedTransportFactory()
     pfactory = TBinaryProtocol.TBinaryProtocolFactory()
