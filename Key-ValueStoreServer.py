@@ -15,9 +15,10 @@ from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
 class StoreHandler:
-    def __init__(self, nameIn):
+    def __init__(self, nameIn, connectionsWaitingIn):
         self.store = {}
         self.name = nameIn
+        self.connectionsWaitingIn = connectionsWaitingIn
 
         # Look for log file, populate the memory if it exists, create one if it does not
         self.logFile = None
@@ -67,23 +68,25 @@ if __name__ == '__main__':
     # Handle command-line arguments
     replicaName = sys.argv[1]
     replicaPort = int(sys.argv[2])
+    replicaConnectionsToMake = [] # Will be a list of tuples: (name, port)
 
     # Read replicas.txt and prepare to connect to other replicas
     try:
         replicaFile = open('replicas.txt', 'r')
 
         for line in replicaFile:
-            rn, rp = tuple(line.split(' '))
-            if rn == replicaName:
+            repTup = tuple(line.split(' ')) # [0] = name, [1] = port
+            if repTup[0] == replicaName: # Exclude if the line describes this replica
                 continue
 
-            print 'Replica to connect to: ' + rn + ' on port ' + rp
+            replicaConnectionsToMake.append(repTup)
+            print 'Replica to connect to: ' + repTup[0] + ' on port ' + repTup[1]
     except IOError:
         print 'Error: expected replicas.txt but did not find it. Not connected to any other replicas'
 
 
 
-    handler = StoreHandler(replicaName)
+    handler = StoreHandler(replicaName, replicaConnectionsToMake)
     processor = Store.Processor(handler)
     transport = TSocket.TServerSocket(port=replicaPort)
     tfactory = TTransport.TBufferedTransportFactory()
