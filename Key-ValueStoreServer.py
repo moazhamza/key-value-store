@@ -64,8 +64,24 @@ if __name__ == '__main__':
         print 'Expected two arguments: name and port'
         return
 
+    # Handle command-line arguments
     replicaName = sys.argv[1]
     replicaPort = int(sys.argv[2])
+
+    # Read replicas.txt and prepare to connect to other replicas
+    try:
+        replicaFile = open('replicas.txt', 'r')
+
+        for line in replicaFile:
+            rn, rp = tuple(line.split(' '))
+            if rn == replicaName:
+                continue
+
+            print 'Replica to connect to: ' + rn + ' on port ' + rp
+    except IOError:
+        print 'Error: expected replicas.txt but did not find it. Not connected to any other replicas'
+
+
 
     handler = StoreHandler(replicaName)
     processor = Store.Processor(handler)
