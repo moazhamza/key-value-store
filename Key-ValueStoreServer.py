@@ -33,9 +33,10 @@ class StoreHandler:
         # TODO: Read through the logger, populating the memory as you go
         for line in log:
             # TODO: Populate the store using the lines of the file (Need to settle on format to write to the file
-            pass
+            key, value = tuple(line.strip(':').split(':'))
+            self.put(key, value)
 
-    def get(self, key):
+    def get(self, key, lvl=None):
         assert type(key) == int
         assert key >= 0
         assert key <= 255
@@ -44,7 +45,7 @@ class StoreHandler:
         else:
             return False
 
-    def put(self, key, value):
+    def put(self, key, value, lvl=None):
         assert type(key) == int
         assert type(value) == str
         assert key >= 0
