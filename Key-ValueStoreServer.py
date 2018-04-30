@@ -3,6 +3,10 @@ class Store:
         self.store = []
         # TODO: Look for your logging file, populate the memory if it exists, create one if it does not
 
+    def populate_from_mem(self, log):
+        # TODO: Read through the logger, populating the memory as you go
+        pass
+
     def get(self, key):
         if key in self.store:
             return self.store[key]
