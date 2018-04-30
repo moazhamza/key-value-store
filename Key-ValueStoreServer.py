@@ -1,18 +1,40 @@
+import glob
+import sys
 import os
+sys.path.append('gen-py')
+sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
+
+#from tutorial import Calculator
+#from tutorial.ttypes import InvalidOperation, Operation
+
+from shared.ttypes import SharedStruct
+
+from thrift.transport import TSocket
+from thrift.transport import TTransport
+from thrift.protocol import TBinaryProtocol
+from thrift.server import TServer
+
+class StoreHandler:
+    def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn):
+        self.store = {}
+        self.name = nameIn
+        self.number = replicaNumIn;
+        self.connectionsWaiting = connectionsWaitingIn
+        self.establishedConnections = [None, None, None, None]
+
+        # TODO: Implement delayed, threaded functions on an interval to establish a client connection to each replica server
+        # for rep in self.connectionsWaiting:
 
 
-class Store:
-    def __init__(self, log_file=None):
-        self.store = []
-        self.log = None
-        if log_file:
-            for root, _, files in os.walk(""):
-                for file in files:
-                    if file == log_file:
-                        self.log = open(file, 'r')
-                        self.__populate_from_mem(self.log)
-                if self.log is None:
-                    self.log = open(log_file, 'rw+')
+        # Look for log file, populate the memory if it exists, create one if it does not
+        self.logFile = None
+        fileName = nameIn + '.txt'
+        try:
+            self.logFile = open(fileName, 'ra')
+            self.__populate_from_mem(self.logFile)
+        except IOError:
+            print 'Persitent storage file not found. Creating ' + fileName + ' now.'
+            self.logFile = open(fileName, 'rw+')
 
     def __populate_from_mem(self, log):
         # TODO: Read through the logger, populating the memory as you go
@@ -36,9 +58,51 @@ class Store:
         assert key >= 0
         assert key <= 255
         # TODO: Write in logger files all writes committed to the store
+        self.logFile.write(str(key) + ':' + value)
         if key in self.store:
             self.store[key] = value
             return True
         else:
             self.store[key] = value
             return False
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        print 'Expected two arguments: name and port'
+        return
+
+    # Handle command-line arguments
+    replicaName = sys.argv[1]
+    replicaPort = int(sys.argv[2])
+    replicaNumber = -1
+    replicaConnectionsToMake = [] # Will be a list of tuples: (name, port)
+
+    # Read replicas.txt and prepare to connect to other replicas
+    try:
+        replicaFile = open('replicas.txt', 'r')
+
+        for i, line in enumerate(replicaFile):
+            repTup = tuple(line.split(' ')) # [0] = name, [1] = port
+            if repTup[0] == replicaName: # Exclude if the line describes this replica
+                replicaNumber = i
+                continue
+
+            replicaConnectionsToMake.append(repTup)
+            print 'Replica to connect to: ' + repTup[0] + ' on port ' + repTup[1]
+    except IOError:
+        print 'Error: expected replicas.txt but did not find it. Not connected to any other replicas'
+
+        if replicaNumber == -1:
+            print 'Error: Replica # is still -1 after looping through replicas.txt -- should not happen'
+
+    handler = StoreHandler(replicaName, replicaNumber, replicaConnectionsToMake)
+    processor = Store.Processor(handler)
+    transport = TSocket.TServerSocket(port=replicaPort)
+    tfactory = TTransport.TBufferedTransportFactory()
+    pfactory = TBinaryProtocol.TBinaryProtocolFactory()
+
+    server = TServer.TSimpleServer(processor, transport, tfactory, pfactory)
+
+    print('Starting the server...')
+    server.serve()
+    print('done.')
