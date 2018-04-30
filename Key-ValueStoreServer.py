@@ -1,5 +1,6 @@
 import glob
 import sys
+import os
 sys.path.append('gen-py')
 sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
 
@@ -14,21 +15,40 @@ from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 
 class StoreHandler:
-    def __init__(self):
+    def __init__(self, nameIn):
         self.store = {}
-        # TODO: Look for your logging file, populate the memory if it exists, create one if it does not
+        self.name = nameIn
 
-    def populate_from_mem(self, log):
+        # Look for log file, populate the memory if it exists, create one if it does not
+        self.logFile = None
+        fileName = nameIn + '.txt'
+        try:
+            self.logFile = open(fileName, 'rw')
+            self.__populate_from_mem(self.logFile)
+        except IOError:
+            print 'Persitent storage file not found. Creating ' + fileName + ' now.'
+            self.logFile = open(fileName, 'rw+')
+
+    def __populate_from_mem(self, log):
         # TODO: Read through the logger, populating the memory as you go
-        pass
+        for line in log:
+            # TODO: Populate the store using the lines of the file (Need to settle on format to write to the file
+            pass
 
     def get(self, key):
+        assert type(key) == int
+        assert key >= 0
+        assert key <= 255
         if key in self.store:
             return self.store[key]
         else:
             return False
 
     def put(self, key, value):
+        assert type(key) == int
+        assert type(value) == str
+        assert key >= 0
+        assert key <= 255
         # TODO: Write in logger files all writes committed to the store
         if key in self.store:
             self.store[key] = value
@@ -45,7 +65,7 @@ if __name__ == '__main__':
     replicaName = sys.argv[1]
     replicaPort = int(sys.argv[2])
 
-    handler = StoreHandler()
+    handler = StoreHandler(replicaName)
     processor = Store.Processor(handler)
     transport = TSocket.TServerSocket(port=replicaPort)
     tfactory = TTransport.TBufferedTransportFactory()
