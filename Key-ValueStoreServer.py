@@ -23,7 +23,7 @@ class StoreHandler:
         self.logFile = None
         fileName = nameIn + '.txt'
         try:
-            self.logFile = open(fileName, 'rw')
+            self.logFile = open(fileName, 'ra')
             self.__populate_from_mem(self.logFile)
         except IOError:
             print 'Persitent storage file not found. Creating ' + fileName + ' now.'
@@ -51,6 +51,7 @@ class StoreHandler:
         assert key >= 0
         assert key <= 255
         # TODO: Write in logger files all writes committed to the store
+        self.logFile.write(str(key) + ':' + value)
         if key in self.store:
             self.store[key] = value
             return True
