@@ -55,13 +55,16 @@ class StoreHandler:
     def __populate_from_mem(self, log):
         for line in log:
             key, value = tuple(line.strip(':').split(':'))
-            self.put(int(key), value)
+            self.store[key] = value.strip()
+            self.time[key] = 0
 
+    # RPC from coordinator to replica for their data
     def get_aux(self, key):
         if key in self.store:
             result = GetResult()
             result.success = True
             result.result = self.store[key]
+            result.time = self.time[key]
             return result
         else:
             result = GetResult()
@@ -69,12 +72,14 @@ class StoreHandler:
             result.value = ""
             return result
 
+    # Delegate async function to fetch other replica's data (or yours)
     def __get_from_different_replica(self, key, arr, finished, replica_num):
         if replica_num == self.number:
             if key in self.store:
                 result = GetResult()
                 result.success = True
                 result.result = self.store[key]
+                result.time = self.time[key]
                 arr[replica_num] = result
                 finished[replica_num] = Status.FOUND_FINISHED
             else:
@@ -93,6 +98,19 @@ class StoreHandler:
             else:
                 finished[replica_num] = Status.NOT_FOUND_FINISHED
 
+    @staticmethod
+    def __get_most_recent(arr):
+        most_recent = ""
+        for result in arr:
+            if result != "":
+                if most_recent == "":
+                    most_recent = result
+                else:
+                    if result.time > most_recent.time:
+                        most_recent = result
+        return most_recent
+
+    # Coordinator get
     def get(self, key, lvl=None):
         if lvl == ConsistencyLevel.ONE:
             assert type(key) == int
@@ -127,7 +145,34 @@ class StoreHandler:
                 raise e
 
         elif lvl == ConsistencyLevel.QUORUM:
-            pass
+            assert type(key) == int
+            assert key >= 0
+            assert key <= 255
+
+            first_key_owner = key // 64
+
+            finished = [Status.NOT_STARTED] * 4
+            arr = [""] * 4
+            for i in range(0, 3, 1):
+                rep_num = (first_key_owner + i) % 4
+                threading.Thread(
+                    target=self.__get_from_different_replica,
+                    name="Trying to get from {}".format(rep_num),
+                    args=[key, arr, finished, rep_num]
+                ).start()
+
+            # Spin until someone gets the result, or they all finish without finding
+            while (len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) < 2) \
+                    and len(list(filter(lambda x: x is Status.NOT_FOUND_FINISHED, finished))) < 3:
+                pass
+
+            found = len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) > 2
+            if found:
+                return self.__get_most_recent(arr).result
+            else:
+                e = SystemException()
+                e.message = "Key not in store"
+                raise e
 
     def put_aux(self, key, value, ts):
         self.store[key] = value
@@ -162,7 +207,7 @@ class StoreHandler:
                 rep_num = (first_key_owner + i) % 4
                 threading.Thread(
                     target=self.__put_to_different_replica,
-                    name="Trying to get from {}".format(rep_num),
+                    name="Trying to put to {}".format(rep_num),
                     args=[key, value, finished, rep_num, ts]
                 ).start()
 
@@ -176,7 +221,33 @@ class StoreHandler:
             else:
                 return False
         elif lvl == ConsistencyLevel.QUORUM:
-            pass
+            assert type(key) == int
+            assert type(value) == str
+            assert key >= 0
+            assert key <= 255
+
+            self.logFile.write(str(key) + ':' + value + '\n')
+            ts = int(time())
+            first_key_owner = key // 64
+
+            finished = [False] * 4
+            for i in range(0, 3, 1):
+                rep_num = (first_key_owner + i) % 4
+                threading.Thread(
+                    target=self.__put_to_different_replica,
+                    name="Trying to put to {}".format(rep_num),
+                    args=[key, value, finished, rep_num, ts]
+                ).start()
+
+            # Spin until someone gets the result, or they all finish without finding
+            while len(list(filter((lambda x: x is True), finished))) < 2:
+                pass
+
+            found = len(list(filter((lambda x: x is True), finished))) >= 2
+            if found:
+                return True
+            else:
+                return False
 
     def __attemptConnection(self, name, num, port):
         # Attempting connection to item repNumber in self.connectionsWaiting

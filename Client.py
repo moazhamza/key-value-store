@@ -21,15 +21,20 @@ def main():
 
     transport.open()
 
-    line = input("Input command: ").lower()
+    line = input("GET OR PUT: ").lower()
     while line:
 
         if line == "g" or line == "get":
             key = input("Input the key: ")
             while not key.isdigit() or int(key) not in range(0, 255):
                 key = input("Please input a valid key: ")
+            consistency = input("Consistency Level - ONE or QUORUM: ").lower()
+            if consistency == '1' or consistency == 'one' or consistency == 'o':
+                consistency = ConsistencyLevel.ONE
+            elif consistency == '2' or consistency == 'quorum' or consistency == 'q':
+                consistency = ConsistencyLevel.QUORUM
             try:
-                print(KVStore.get(int(key), ConsistencyLevel.ONE))
+                print(KVStore.get(int(key), consistency))
             except SystemException as e:
                 print(e.message)
 
@@ -38,11 +43,19 @@ def main():
             while not key.isdigit() or int(key) not in range(0, 255):
                 key = input("Please input a valid key: ")
             value = input("Input the string value: ")
-            KVStore.put(int(key), value, ConsistencyLevel.ONE)
+            consistency = input("Consistency Level - ONE or QUORUM: ").lower()
+            while consistency != ConsistencyLevel.QUORUM and consistency != ConsistencyLevel.ONE:
+                if consistency == '1' or consistency == 'one' or consistency == 'o':
+                    consistency = ConsistencyLevel.ONE
+                elif consistency == '2' or consistency == 'quorum' or consistency == 'q':
+                    consistency = ConsistencyLevel.QUORUM
+                else:
+                    consistency = input("Invalid option - set valid consistency option: ")
+            KVStore.put(int(key), value, consistency)
 
         else:
             print("Please input a valid command")
-        line = input("Input command: ").lower()
+        line = input("GET or PUT: ").lower()
 
 
 if __name__ == "__main__":
