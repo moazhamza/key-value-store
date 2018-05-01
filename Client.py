@@ -1,5 +1,4 @@
 import sys
-
 sys.path.append('gen-py')
 
 from thrift.protocol import TBinaryProtocol
@@ -9,6 +8,7 @@ from thrift.transport import TTransport
 from keyValStore import KeyValueStore
 from keyValStore.ttypes import ConsistencyLevel
 from keyValStore.ttypes import SystemException
+
 
 
 def main():
@@ -23,17 +23,20 @@ def main():
 
     line = input("Input command: ").lower()
     while line:
-        key = input("Input the key: ")
-        while not key.isdigit() or int(key) not in range(0, 255):
-            key = input("Please input a valid key: ")
 
         if line == "g" or line == "get":
+            key = input("Input the key: ")
+            while not key.isdigit() or int(key) not in range(0, 255):
+                key = input("Please input a valid key: ")
             try:
                 print(KVStore.get(int(key), ConsistencyLevel.ONE))
             except SystemException as e:
                 print(e.message)
 
         elif line == 'p' or line == 'put':
+            key = input("Input the key: ")
+            while not key.isdigit() or int(key) not in range(0, 255):
+                key = input("Please input a valid key: ")
             value = input("Input the string value: ")
             KVStore.put(int(key), value, ConsistencyLevel.ONE)
 
