@@ -14,7 +14,6 @@ from thrift.protocol import TBinaryProtocol
 from thrift.server import TServer
 from thrift.transport.TTransport import TTransportException
 
-
 class Status(Enum):
     NOT_STARTED = 0
     NOT_FOUND_FINISHED = 1
@@ -166,7 +165,7 @@ class StoreHandler:
                     and len(list(filter(lambda x: x is Status.NOT_FOUND_FINISHED, finished))) < 3:
                 pass
 
-            found = len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) > 2
+            found = len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) >= 2
             if found:
                 return self.__get_most_recent(arr).result
             else:
@@ -175,6 +174,7 @@ class StoreHandler:
                 raise e
 
     def put_aux(self, key, value, ts):
+        self.logFile.write(str(key) + ':' + value + '\n')
         self.store[key] = value
         self.time[key] = ts
         return True
@@ -273,7 +273,7 @@ class StoreHandler:
             self.__attemptConnection(name, num, port)
 
 
-if __name__ == '__main__':
+def main():
     if len(sys.argv) != 3:
         print('Expected two arguments: name and port')
         exit(-1)
@@ -307,5 +307,11 @@ if __name__ == '__main__':
     server = TServer.TThreadedServer(processor, transport, tfactory, pfactory)
 
     print('Starting the server...')
-    server.serve()
-    print('done.')
+    try:
+        server.serve()
+    except KeyboardInterrupt:
+        handler.logFile.close()
+        print('done.')
+
+if __name__ == '__main__':
+    main()
