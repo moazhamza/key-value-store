@@ -24,6 +24,7 @@ class Status(Enum):
 class StoreHandler:
     def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn):
         self.store = {}
+        self.time = {}
         self.name = nameIn
         self.number = replicaNumIn
         self.connectionsWaiting = connectionsWaitingIn
@@ -123,22 +124,27 @@ class StoreHandler:
             else:
                 e = SystemException()
                 e.message = "Key not in store"
-                return e
+                raise e
 
         elif lvl == ConsistencyLevel.QUORUM:
             pass
 
-    def __put_to_different_replica(self, key, value, result_arr, finished_arr, rep_num, ts):
+    def put_aux(self, key, value, ts):
+        self.store[key] = value
+        self.time[key] = ts
+        return True
+
+    def __put_to_different_replica(self, key, value, finished_arr, rep_num, ts):
         if rep_num == self.number:
             self.store[key] = value
-
+            self.time[key] = ts
+            finished_arr[rep_num] = True
         else:
-            result = self.establishedConnections[replica_num][0].get_aux(key)
-            arr[replica_num] = result
-            if result.success:
-                finished[replica_num] = Status.FOUND_FINISHED
+            result = self.establishedConnections[rep_num][0].put_aux(key, value, ts)
+            if result:
+                finished_arr[rep_num] = True
             else:
-                finished[replica_num] = Status.NOT_FOUND_FINISHED
+                finished_arr[rep_num] = False
 
     def put(self, key, value, lvl=None):
         if lvl == ConsistencyLevel.ONE:
@@ -151,40 +157,24 @@ class StoreHandler:
             ts = int(time())
             first_key_owner = key // 64
 
-            finished = [Status.NOT_STARTED] * 4
-            arr = [""] * 4
+            finished = [False] * 4
             for i in range(0, 3, 1):
                 rep_num = (first_key_owner + i) % 4
                 threading.Thread(
                     target=self.__put_to_different_replica,
                     name="Trying to get from {}".format(rep_num),
-                    args=[key, value, arr, finished, rep_num, ts]
+                    args=[key, value, finished, rep_num, ts]
                 ).start()
 
             # Spin until someone gets the result, or they all finish without finding
-            while (len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) < 1) \
-                    and len(list(filter(lambda x: x is Status.NOT_FOUND_FINISHED, finished))) < 3:
+            while len(list(filter((lambda x: x is True), finished))) < 1:
                 pass
 
-            found = len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) > 0
+            found = len(list(filter((lambda x: x is True), finished))) > 0
             if found:
-                for result in arr:
-                    if result != "" and result.success:
-                        return result.result
+                return True
             else:
-                e = SystemException()
-                e.message = "Key not in store"
-                return e
-            # if first_key_owner == self.number:
-            #     print("Put request for {} -> {}".format(key, value))
-            #     if key in self.store:
-            #         self.store[key] = value
-            #         return True
-            #     else:
-            #         self.store[key] = value
-            #         return False
-            # else:
-            #     return self.establishedConnections[first_key_owner][0].put(key, value, ConsistencyLevel.ONE)
+                return False
         elif lvl == ConsistencyLevel.QUORUM:
             pass
 
