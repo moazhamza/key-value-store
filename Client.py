@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+
 import sys
+import glob
 sys.path.append('gen-py')
+sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
 
 from thrift.protocol import TBinaryProtocol
 from thrift.transport import TSocket

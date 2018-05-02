@@ -1,9 +1,13 @@
+#!/usr/bin/env python
+
 import sys
 import threading
+import glob
 from enum import Enum
 from time import sleep, time
 
 sys.path.append('gen-py')
+sys.path.insert(0, glob.glob('/home/yaoliu/src_code/local/lib/lib/python2.7/site-packages')[0])
 
 from keyValStore import KeyValueStore
 from keyValStore.ttypes import SystemException, ConsistencyLevel, GetResult
@@ -21,12 +25,16 @@ class Status(Enum):
 
 
 class StoreHandler:
-    def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn):
+    def __init__(self, nameIn, replicaNumIn, connectionsWaitingIn, consistencyMechanismIn):
         self.store = {}
         self.time = {}
         self.name = nameIn
         self.number = replicaNumIn
         self.connectionsWaiting = connectionsWaitingIn
+        self.consistencyMechanism = consistencyMechanismIn
+        # 0 = Read repair, 1 = Hinted handoff
+        self.hintedHandoff = [[], [], [], []] # Essentially queues for handoff items
+        # Each of the four lists will contain elements of form: (key, value, ts)
 
         # Will be a list of tuples: (client, transport) after connection has been established
         self.establishedConnections = [None, None, None, None]
@@ -58,7 +66,10 @@ class StoreHandler:
             self.time[key] = 0
 
     # RPC from coordinator to replica for their data
-    def get_aux(self, key):
+    def get_aux(self, issuing_replica, key):
+    	if self.consistencyMechanism == 1 and len(self.hintedHandoff[issuing_replica]) > 0:
+            self.__dumpHintedHandoff(issuing_replica)
+            
         if key in self.store:
             result = GetResult()
             result.success = True
@@ -90,12 +101,13 @@ class StoreHandler:
                 finished[replica_num] = Status.NOT_FOUND_FINISHED
 
         else:
-            result = self.establishedConnections[replica_num][0].get_aux(key)
-            arr[replica_num] = result
-            if result.success:
-                finished[replica_num] = Status.FOUND_FINISHED
-            else:
-                finished[replica_num] = Status.NOT_FOUND_FINISHED
+            if self.establishedConnections[replica_num] != None:
+	        result = self.establishedConnections[replica_num][0].get_aux(self.number, key)
+	        arr[replica_num] = result
+	        if result.success:
+	            finished[replica_num] = Status.FOUND_FINISHED
+	        else:
+	            finished[replica_num] = Status.NOT_FOUND_FINISHED
 
     @staticmethod
     def __get_most_recent(arr):
@@ -137,6 +149,9 @@ class StoreHandler:
             if found:
                 for result in arr:
                     if result != "" and result.success:
+                    	if self.consistencyMechanism == 0:
+                    	    self.__performReadRepair(key, result.result, result.time)
+                    	
                         return result.result
             else:
                 e = SystemException()
@@ -167,16 +182,23 @@ class StoreHandler:
 
             found = len(list(filter((lambda x: x is Status.FOUND_FINISHED), finished))) >= 2
             if found:
-                return self.__get_most_recent(arr).result
+            	resultStruct = self.__get_most_recent(arr)
+            	if self.consistencyMechanism == 0:
+            	    self.__performReadRepair(key, resultStruct.result, resultStruct.time)
+                return resultStruct.result
             else:
                 e = SystemException()
                 e.message = "Key not in store"
                 raise e
 
-    def put_aux(self, key, value, ts):
+    def put_aux(self, issuing_replica, key, value, ts):
         self.logFile.write(str(key) + ':' + value + '\n')
         self.store[key] = value
         self.time[key] = ts
+        
+        if self.consistencyMechanism == 1 and len(self.hintedHandoff[issuing_replica]) > 0:
+            self.__dumpHintedHandoff(issuing_replica)
+            
         return True
 
     def __put_to_different_replica(self, key, value, finished_arr, rep_num, ts):
@@ -185,16 +207,26 @@ class StoreHandler:
             self.time[key] = ts
             finished_arr[rep_num] = True
         else:
-            result = self.establishedConnections[rep_num][0].put_aux(key, value, ts)
-            if result:
-                finished_arr[rep_num] = True
-            else:
-                finished_arr[rep_num] = False
+            result = ""
+            try:
+                result = self.establishedConnections[rep_num][0].put_aux(self.number, key, value, ts)
+                
+                if result:
+                    finished_arr[rep_num] = True
+                else:
+                    raise SystemException()
+            except:
+            	if self.consistencyMechanism == 1: # Hinted handoff
+            	    self.hintedHandoff[rep_num].append((key,value,ts))
+            	    
+            	    finished_arr[rep_num] = True
+            	else:
+                    finished_arr[rep_num] = False
 
     def put(self, key, value, lvl=None):
         if lvl == ConsistencyLevel.ONE:
             assert type(key) == int
-            assert type(value) == str
+            #assert type(value) == str
             assert key >= 0
             assert key <= 255
 
@@ -222,7 +254,7 @@ class StoreHandler:
                 return False
         elif lvl == ConsistencyLevel.QUORUM:
             assert type(key) == int
-            assert type(value) == str
+            #assert type(value) == str
             assert key >= 0
             assert key <= 255
 
@@ -266,21 +298,43 @@ class StoreHandler:
             # Connect!
             transport.open()
             self.establishedConnections[num] = (client, transport)
-            print("connected to {}".format(name), flush=True)
+            print("connected to {}".format(name))
         except TTransportException:
-            print('Rescheduling connection attempt with ' + name + "@" + str(port), flush=True)
+            print('Rescheduling connection attempt with ' + name + "@" + str(port))
             sleep(5)
             self.__attemptConnection(name, num, port)
 
+    def __performReadRepair(self, key, val, ts):
+    	excludedReplicasList = [3,0,1,2]
+    	excludedReplica = excludedReplicasList[key//64]
+    	
+    	for rep_num in range(0,3,1):
+    	    if rep_num == excludedReplica:
+    	    	continue
+    	    elif rep_num == self.number:
+    	    	if val != self.store[key] and ts > self.time[key]:
+    	    		self.store[key] = val
+    	    		self.time[key] = ts
+    	    else:
+		self.establishedConnections[rep_num][0].put_aux(self.number, key, val, ts)
+		
+    def __dumpHintedHandoff(self, rep_num):
+    	# Send all of our queued writes to this replica
+    	for handoff in self.hintedHandoff[rep_num]:
+    		self.establishedConnections[rep_num][0].put_aux(self.number, handoff[0], handoff[1], handoff[2])
+    		
+    	# The queue has been dumped, so we empty it here
+    	self.hintedHandoff[rep_num] = []
 
 def main():
-    if len(sys.argv) != 3:
-        print('Expected two arguments: name and port')
+    if len(sys.argv) != 4:
+        print('Expected two arguments: name(str), port(int), consistency mechanism(int): 0 or 1 = read repair/hinted handoff')
         exit(-1)
 
     # Handle command-line arguments
     replicaName = sys.argv[1]
     replicaPort = int(sys.argv[2])
+    consistencyMechanism = int(sys.argv[3])
     replicaNumber = -1
     replicaConnectionsToMake = []  # Will be a list of tuples: (name, port)
 
@@ -298,7 +352,7 @@ def main():
         print('Error: expected replicas.txt but did not find it. Not connected to any other replicas')
         assert replicaNumber != -1
 
-    handler = StoreHandler(replicaName, replicaNumber, replicaConnectionsToMake)
+    handler = StoreHandler(replicaName, replicaNumber, replicaConnectionsToMake, consistencyMechanism)
     processor = KeyValueStore.Processor(handler)
     transport = TSocket.TServerSocket(port=replicaPort)
     tfactory = TTransport.TBufferedTransportFactory()
